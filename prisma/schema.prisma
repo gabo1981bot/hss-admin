@@ -1,0 +1,46 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Profile {
+  id        String   @id @db.Uuid
+  fullName  String
+  email     String?
+  role      String
+  createdAt DateTime
+
+  @@map("Profile")
+}
+
+model Subscription {
+  id                   String             @id @db.Uuid
+  email                String
+  planId               SubscriptionPlan
+  status               SubscriptionStatus
+  mercadopagoPaymentId String?
+  currentPeriodEnd     DateTime?
+  createdAt            DateTime
+  updatedAt            DateTime
+
+  @@map("Subscription")
+}
+
+enum SubscriptionPlan {
+  inicial
+  profesional
+  full
+}
+
+enum SubscriptionStatus {
+  pending_payment
+  trial
+  active
+  past_due
+  canceled
+}
