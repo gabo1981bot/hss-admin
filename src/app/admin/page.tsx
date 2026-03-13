@@ -1,5 +1,9 @@
 import { prisma } from "@/lib/prisma";
 
+export const metadata = {
+  robots: { index: false, follow: false },
+};
+
 function fmt(date: Date | null) {
   if (!date) return "-";
   return new Intl.DateTimeFormat("es-AR", { dateStyle: "short", timeStyle: "short" }).format(date);
@@ -36,9 +40,16 @@ export default async function AdminPage() {
 
   return (
     <main className="mx-auto max-w-7xl p-6 space-y-6">
-      <header>
-        <h1 className="text-3xl font-bold">HSS Admin</h1>
-        <p className="text-sm text-gray-500">Panel operativo (MVP free): usuarios, suscripciones y pagos.</p>
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold">HSS Admin</h1>
+          <p className="text-sm text-gray-500">Panel operativo (MVP free): usuarios, suscripciones y pagos.</p>
+        </div>
+        <form action="/api/auth/logout" method="post">
+          <button className="rounded-lg border px-3 py-2 text-sm font-semibold hover:bg-gray-50" type="submit">
+            Cerrar sesión
+          </button>
+        </form>
       </header>
 
       <section className="grid grid-cols-2 md:grid-cols-5 gap-3">
