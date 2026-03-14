@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isAdminEmail } from "@/lib/admin";
 
 const PROTECTED_PREFIX = "/admin";
-const PUBLIC_PATHS = ["/login", "/forbidden"];
+const PUBLIC_PATHS = ["/login", "/forbidden", "/admin/login", "/admin/forbidden"];
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -33,10 +33,10 @@ export async function updateSession(request: NextRequest) {
   const isProtected = pathname === PROTECTED_PREFIX || pathname.startsWith(`${PROTECTED_PREFIX}/`);
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
-  if (isProtected) {
+  if (isProtected && !isPublic) {
     if (!user) {
       const url = request.nextUrl.clone();
-      url.pathname = "/login";
+      url.pathname = "/admin/login";
       return NextResponse.redirect(url);
     }
 
@@ -45,15 +45,15 @@ export async function updateSession(request: NextRequest) {
 
     if (!allowed) {
       const url = request.nextUrl.clone();
-      url.pathname = "/forbidden";
+      url.pathname = "/admin/forbidden";
       return NextResponse.redirect(url);
     }
   }
 
-  if (user && isPublic && pathname === "/login") {
+  if (user && isPublic && (pathname === "/login" || pathname === "/admin/login")) {
     const email = (user.email || "").trim().toLowerCase();
     const url = request.nextUrl.clone();
-    url.pathname = isAdminEmail(email) ? "/admin" : "/forbidden";
+    url.pathname = isAdminEmail(email) ? "/admin" : "/admin/forbidden";
     return NextResponse.redirect(url);
   }
 
