@@ -20,15 +20,29 @@ model Profile {
 
 model Subscription {
   id                   String             @id @db.Uuid
+  appId                String
   email                String
   planId               SubscriptionPlan
   status               SubscriptionStatus
   mercadopagoPaymentId String?
   currentPeriodEnd     DateTime?
+  contactedAt          DateTime?
   createdAt            DateTime
   updatedAt            DateTime
 
   @@map("Subscription")
+}
+
+model SubscriptionEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  subscriptionId String   @db.Uuid
+  source         String
+  eventType      String
+  externalId     String?
+  payload        Json?
+  createdAt      DateTime @default(now())
+
+  @@map("SubscriptionEvent")
 }
 
 enum SubscriptionPlan {

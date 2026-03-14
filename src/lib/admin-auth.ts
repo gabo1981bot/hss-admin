@@ -1,12 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-
-function parseAdminEmails(raw: string | undefined) {
-  if (!raw) return [];
-  return raw
-    .split(",")
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
-}
+import { isAdminEmail } from "@/lib/admin";
 
 export async function requireAdminUser() {
   const supabase = await createClient();
@@ -19,9 +12,8 @@ export async function requireAdminUser() {
   }
 
   const email = (user.email || "").trim().toLowerCase();
-  const admins = parseAdminEmails(process.env.ADMIN_EMAILS);
 
-  if (!email || admins.length === 0 || !admins.includes(email)) {
+  if (!isAdminEmail(email)) {
     throw new Error("FORBIDDEN");
   }
 

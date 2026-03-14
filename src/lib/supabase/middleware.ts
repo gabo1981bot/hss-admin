@@ -1,16 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isAdminEmail } from "@/lib/admin";
 
 const PROTECTED_PREFIX = "/admin";
 const PUBLIC_PATHS = ["/login", "/forbidden"];
-
-function parseAdminEmails(raw: string | undefined) {
-  if (!raw) return [];
-  return raw
-    .split(",")
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
-}
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -47,9 +40,8 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
-    const admins = parseAdminEmails(process.env.ADMIN_EMAILS);
     const email = (user.email || "").trim().toLowerCase();
-    const allowed = admins.includes(email);
+    const allowed = isAdminEmail(email);
 
     if (!allowed) {
       const url = request.nextUrl.clone();
@@ -59,10 +51,9 @@ export async function updateSession(request: NextRequest) {
   }
 
   if (user && isPublic && pathname === "/login") {
-    const admins = parseAdminEmails(process.env.ADMIN_EMAILS);
     const email = (user.email || "").trim().toLowerCase();
     const url = request.nextUrl.clone();
-    url.pathname = admins.includes(email) ? "/admin" : "/forbidden";
+    url.pathname = isAdminEmail(email) ? "/admin" : "/forbidden";
     return NextResponse.redirect(url);
   }
 

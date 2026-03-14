@@ -27,18 +27,31 @@ type StatusFilter = (typeof validStatuses)[number];
 export default async function AdminPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ cleaned?: string; status?: string; q?: string }>;
+  searchParams?: Promise<{
+    cleaned?: string;
+    status?: string;
+    q?: string;
+    app?: string;
+    preset?: string;
+    ok?: string;
+    err?: string;
+  }>;
 }) {
   const params = (await searchParams) || {};
   const status = validStatuses.includes((params.status || "all") as StatusFilter)
     ? ((params.status || "all") as StatusFilter)
     : "all";
   const q = (params.q || "").trim();
+  const app = (params.app || "hss_taller").trim();
+  const preset = (params.preset || "").trim();
 
   const where: {
+    appId?: string;
     status?: "pending_payment" | "trial" | "active" | "past_due" | "canceled";
     email?: { contains: string; mode: "insensitive" };
-  } = {};
+    createdAt?: { lte?: Date };
+    currentPeriodEnd?: { gte?: Date; lte?: Date };
+  } = { appId: app || "hss_taller" };
 
   if (status !== "all") {
     where.status = status;
@@ -49,7 +62,18 @@ export default async function AdminPage({
   }
 
   const now = new Date();
+  const nowMs = now.getTime();
   const in7Days = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+  if (preset === "pending_48h") {
+    where.status = "pending_payment";
+    where.createdAt = { lte: new Date(nowMs - 48 * 60 * 60 * 1000) };
+  }
+
+  if (preset === "due_7d") {
+    where.status = "active";
+    where.currentPeriodEnd = { gte: now, lte: in7Days };
+  }
 
   const [
     totalProfiles,
@@ -78,11 +102,13 @@ export default async function AdminPage({
       take: 50,
       select: {
         id: true,
+        appId: true,
         email: true,
         planId: true,
         status: true,
         mercadopagoPaymentId: true,
         currentPeriodEnd: true,
+        contactedAt: true,
         createdAt: true,
       },
     }),
@@ -93,7 +119,7 @@ export default async function AdminPage({
     }),
   ]);
 
-  const exportUrl = `/api/admin/subscriptions/export?status=${encodeURIComponent(status)}&q=${encodeURIComponent(q)}`;
+  const exportUrl = `/api/admin/subscriptions/export?status=${encodeURIComponent(status)}&q=${encodeURIComponent(q)}&app=${encodeURIComponent(app)}&preset=${encodeURIComponent(preset)}`;
 
   return (
     <main className="min-h-screen bg-[#191923] text-[#fbfef9]">
@@ -129,6 +155,18 @@ export default async function AdminPage({
           </div>
         ) : null}
 
+        {params.ok ? (
+          <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-300">
+            Acción completada: <strong>{params.ok}</strong>
+          </div>
+        ) : null}
+
+        {params.err ? (
+          <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+            Error: <strong>{params.err}</strong>
+          </div>
+        ) : null}
+
         <section className="grid grid-cols-2 md:grid-cols-6 gap-3">
           <Card label="Perfiles" value={totalProfiles} />
           <Card label="Suscripciones" value={totalSubs} />
@@ -138,8 +176,15 @@ export default async function AdminPage({
           <Card label="Vencen 7 días" value={dueIn7Days} accent="text-sky-300" />
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-[#232331] p-4">
-          <form className="grid gap-3 md:grid-cols-[220px_1fr_auto_auto]" method="get" action="/admin">
+        <section className="rounded-2xl border border-white/10 bg-[#232331] p-4 space-y-3">
+          <form className="grid gap-3 md:grid-cols-[180px_220px_1fr_auto_auto]" method="get" action="/admin">
+            <select
+              name="app"
+              defaultValue={app}
+              className="rounded-lg border border-white/20 bg-[#191923] px-3 py-2 text-sm outline-none"
+            >
+              <option value="hss_taller">HSS Taller</option>
+            </select>
             <select
               name="status"
               defaultValue={status}
@@ -168,6 +213,21 @@ export default async function AdminPage({
               Export CSV
             </Link>
           </form>
+
+          <div className="flex flex-wrap gap-2 text-xs">
+            <Link className="rounded-full border border-white/20 px-3 py-1 hover:bg-white/5" href={`/admin?app=${encodeURIComponent(app)}&preset=pending_48h`}>
+              Pendientes &gt; 48h
+            </Link>
+            <Link className="rounded-full border border-white/20 px-3 py-1 hover:bg-white/5" href={`/admin?app=${encodeURIComponent(app)}&preset=due_7d`}>
+              Vencen en 7 días
+            </Link>
+            <Link className="rounded-full border border-white/20 px-3 py-1 hover:bg-white/5" href={`/admin?app=${encodeURIComponent(app)}&status=past_due`}>
+              Solo deudores
+            </Link>
+            <Link className="rounded-full border border-white/20 px-3 py-1 hover:bg-white/5" href={`/admin?app=${encodeURIComponent(app)}`}>
+              Limpiar filtros
+            </Link>
+          </div>
         </section>
 
         <section className="border border-white/10 rounded-2xl overflow-hidden bg-[#232331]">
@@ -177,28 +237,68 @@ export default async function AdminPage({
               <thead className="bg-white/5 text-left text-slate-300">
                 <tr>
                   <th className="px-4 py-2">Email</th>
+                  <th className="px-4 py-2">App</th>
                   <th className="px-4 py-2">Plan</th>
                   <th className="px-4 py-2">Estado</th>
                   <th className="px-4 py-2">Payment ID</th>
                   <th className="px-4 py-2">Próx. vencimiento</th>
+                  <th className="px-4 py-2">Días mora</th>
                   <th className="px-4 py-2">Alta</th>
+                  <th className="px-4 py-2">Acciones</th>
                 </tr>
               </thead>
               <tbody>
-                {subscriptions.map((s) => (
-                  <tr key={s.id} className="border-t border-white/10">
-                    <td className="px-4 py-2">{s.email}</td>
-                    <td className="px-4 py-2 uppercase">{s.planId}</td>
-                    <td className="px-4 py-2">
-                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs ${statusBadge(s.status)}`}>
-                        {s.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2">{s.mercadopagoPaymentId ?? "-"}</td>
-                    <td className="px-4 py-2">{fmt(s.currentPeriodEnd)}</td>
-                    <td className="px-4 py-2">{fmt(s.createdAt)}</td>
-                  </tr>
-                ))}
+                {subscriptions.map((s) => {
+                  const overdueDays =
+                    s.status === "past_due" && s.currentPeriodEnd
+                      ? Math.max(1, Math.floor((nowMs - s.currentPeriodEnd.getTime()) / (24 * 60 * 60 * 1000)))
+                      : 0;
+
+                  const payLink = `https://app.taller.hss.ar/checkout?plan=${s.planId}&email=${encodeURIComponent(s.email)}`;
+
+                  return (
+                    <tr key={s.id} className="border-t border-white/10">
+                      <td className="px-4 py-2">{s.email}</td>
+                      <td className="px-4 py-2">{s.appId}</td>
+                      <td className="px-4 py-2 uppercase">{s.planId}</td>
+                      <td className="px-4 py-2">
+                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs ${statusBadge(s.status)}`}>
+                          {s.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2">{s.mercadopagoPaymentId ?? "-"}</td>
+                      <td className="px-4 py-2">{fmt(s.currentPeriodEnd)}</td>
+                      <td className="px-4 py-2">{overdueDays > 0 ? overdueDays : "-"}</td>
+                      <td className="px-4 py-2">{fmt(s.createdAt)}</td>
+                      <td className="px-4 py-2">
+                        <div className="flex flex-wrap gap-1">
+                          <a
+                            href={payLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="rounded border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-xs text-sky-300"
+                          >
+                            Link pago
+                          </a>
+                          <form action="/api/admin/subscriptions/mark-contacted" method="post">
+                            <input type="hidden" name="subscriptionId" value={s.id} />
+                            <button className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-300" type="submit">
+                              {s.contactedAt ? "Contactado" : "Marcar contacto"}
+                            </button>
+                          </form>
+                          {(s.status === "past_due" || s.status === "canceled") && (
+                            <form action="/api/admin/subscriptions/reactivate" method="post">
+                              <input type="hidden" name="subscriptionId" value={s.id} />
+                              <button className="rounded border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300" type="submit">
+                                Reactivar
+                              </button>
+                            </form>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
