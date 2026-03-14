@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 
 export const metadata = {
@@ -19,22 +20,62 @@ function statusBadge(status: string) {
   return "bg-slate-500/20 text-slate-300 border-slate-500/30";
 }
 
+const validStatuses = ["all", "active", "pending_payment", "past_due", "trial", "canceled"] as const;
+
+type StatusFilter = (typeof validStatuses)[number];
+
 export default async function AdminPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ cleaned?: string }>;
+  searchParams?: Promise<{ cleaned?: string; status?: string; q?: string }>;
 }) {
   const params = (await searchParams) || {};
+  const status = validStatuses.includes((params.status || "all") as StatusFilter)
+    ? ((params.status || "all") as StatusFilter)
+    : "all";
+  const q = (params.q || "").trim();
 
-  const [totalProfiles, totalSubs, activeSubs, pendingSubs, pastDueSubs, subscriptions, profiles] = await Promise.all([
+  const where: {
+    status?: "pending_payment" | "trial" | "active" | "past_due" | "canceled";
+    email?: { contains: string; mode: "insensitive" };
+  } = {};
+
+  if (status !== "all") {
+    where.status = status;
+  }
+
+  if (q) {
+    where.email = { contains: q, mode: "insensitive" };
+  }
+
+  const now = new Date();
+  const in7Days = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+  const [
+    totalProfiles,
+    totalSubs,
+    activeSubs,
+    pendingSubs,
+    pastDueSubs,
+    dueIn7Days,
+    subscriptions,
+    profiles,
+  ] = await Promise.all([
     prisma.profile.count(),
     prisma.subscription.count(),
     prisma.subscription.count({ where: { status: "active" } }),
     prisma.subscription.count({ where: { status: "pending_payment" } }),
     prisma.subscription.count({ where: { status: "past_due" } }),
+    prisma.subscription.count({
+      where: {
+        status: "active",
+        currentPeriodEnd: { gte: now, lte: in7Days },
+      },
+    }),
     prisma.subscription.findMany({
+      where,
       orderBy: { createdAt: "desc" },
-      take: 30,
+      take: 50,
       select: {
         id: true,
         email: true,
@@ -51,6 +92,8 @@ export default async function AdminPage({
       select: { id: true, fullName: true, email: true, role: true, createdAt: true },
     }),
   ]);
+
+  const exportUrl = `/api/admin/subscriptions/export?status=${encodeURIComponent(status)}&q=${encodeURIComponent(q)}`;
 
   return (
     <main className="min-h-screen bg-[#191923] text-[#fbfef9]">
@@ -86,12 +129,45 @@ export default async function AdminPage({
           </div>
         ) : null}
 
-        <section className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <section className="grid grid-cols-2 md:grid-cols-6 gap-3">
           <Card label="Perfiles" value={totalProfiles} />
           <Card label="Suscripciones" value={totalSubs} />
           <Card label="Activas" value={activeSubs} accent="text-emerald-300" />
           <Card label="Pendientes" value={pendingSubs} accent="text-amber-300" />
           <Card label="Past due" value={pastDueSubs} accent="text-rose-300" />
+          <Card label="Vencen 7 días" value={dueIn7Days} accent="text-sky-300" />
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-[#232331] p-4">
+          <form className="grid gap-3 md:grid-cols-[220px_1fr_auto_auto]" method="get" action="/admin">
+            <select
+              name="status"
+              defaultValue={status}
+              className="rounded-lg border border-white/20 bg-[#191923] px-3 py-2 text-sm outline-none"
+            >
+              <option value="all">Todos los estados</option>
+              <option value="active">Activas</option>
+              <option value="pending_payment">Pendientes</option>
+              <option value="past_due">Past due</option>
+              <option value="trial">Trial</option>
+              <option value="canceled">Canceladas</option>
+            </select>
+            <input
+              name="q"
+              defaultValue={q}
+              placeholder="Buscar por email..."
+              className="rounded-lg border border-white/20 bg-[#191923] px-3 py-2 text-sm outline-none"
+            />
+            <button className="rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold hover:bg-white/5" type="submit">
+              Aplicar filtros
+            </button>
+            <Link
+              href={exportUrl}
+              className="rounded-lg border border-[#0e79b2]/50 bg-[#0e79b2]/15 px-4 py-2 text-sm font-semibold text-[#7dc8ef] hover:bg-[#0e79b2]/25"
+            >
+              Export CSV
+            </Link>
+          </form>
         </section>
 
         <section className="border border-white/10 rounded-2xl overflow-hidden bg-[#232331]">
