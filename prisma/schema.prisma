@@ -19,16 +19,18 @@ model Profile {
 }
 
 model Subscription {
-  id                   String             @id @db.Uuid
+  id                   String             @id @default(uuid()) @db.Uuid
   appId                String
   email                String
   planId               SubscriptionPlan
   status               SubscriptionStatus
   mercadopagoPaymentId String?
+  startedAt            DateTime?
+  trialEndsAt          DateTime?
   currentPeriodEnd     DateTime?
   contactedAt          DateTime?
-  createdAt            DateTime
-  updatedAt            DateTime
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
 
   @@map("Subscription")
 }

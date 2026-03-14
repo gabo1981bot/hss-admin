@@ -176,7 +176,39 @@ export default async function AdminPage({
           <Card label="Vencen 7 días" value={dueIn7Days} accent="text-sky-300" />
         </section>
 
-        <section className="rounded-2xl border border-white/10 bg-[#232331] p-4 space-y-3">
+        <section className="rounded-2xl border border-white/10 bg-[#232331] p-4 space-y-4">
+          <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-sky-300">Alta manual de acceso (trial)</p>
+            <form className="mt-2 grid gap-2 md:grid-cols-[1.2fr_160px_120px_1fr_auto]" method="post" action="/api/admin/subscriptions/grant-trial">
+              <input
+                name="email"
+                type="email"
+                placeholder="cliente@email.com"
+                required
+                className="rounded-lg border border-white/20 bg-[#191923] px-3 py-2 text-sm outline-none"
+              />
+              <select name="plan" defaultValue="inicial" className="rounded-lg border border-white/20 bg-[#191923] px-3 py-2 text-sm outline-none">
+                <option value="inicial">Inicial</option>
+                <option value="profesional">Profesional</option>
+                <option value="full">Full</option>
+              </select>
+              <select name="days" defaultValue="7" className="rounded-lg border border-white/20 bg-[#191923] px-3 py-2 text-sm outline-none">
+                <option value="7">7 días</option>
+                <option value="15">15 días</option>
+                <option value="30">30 días</option>
+              </select>
+              <input
+                name="reason"
+                placeholder="motivo (ej: testing)"
+                defaultValue="testing"
+                className="rounded-lg border border-white/20 bg-[#191923] px-3 py-2 text-sm outline-none"
+              />
+              <button className="rounded-lg border border-sky-500/50 bg-sky-500/20 px-3 py-2 text-sm font-semibold text-sky-200 hover:bg-sky-500/30" type="submit">
+                Otorgar trial
+              </button>
+            </form>
+          </div>
+
           <form className="grid gap-3 md:grid-cols-[180px_220px_1fr_auto_auto]" method="get" action="/admin">
             <select
               name="app"
@@ -284,6 +316,15 @@ export default async function AdminPage({
                             <input type="hidden" name="subscriptionId" value={s.id} />
                             <button className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-300" type="submit">
                               {s.contactedAt ? "Contactado" : "Marcar contacto"}
+                            </button>
+                          </form>
+                          <form action="/api/admin/subscriptions/grant-trial" method="post">
+                            <input type="hidden" name="email" value={s.email} />
+                            <input type="hidden" name="plan" value={s.planId} />
+                            <input type="hidden" name="days" value="7" />
+                            <input type="hidden" name="reason" value="support_trial" />
+                            <button className="rounded border border-fuchsia-500/40 bg-fuchsia-500/10 px-2 py-1 text-xs text-fuchsia-300" type="submit">
+                              Trial 7d
                             </button>
                           </form>
                           {(s.status === "past_due" || s.status === "canceled") && (
