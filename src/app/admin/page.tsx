@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import { SubscriptionActions } from "./subscription-actions";
 
 export const metadata = {
   robots: { index: false, follow: false },
@@ -303,39 +304,14 @@ export default async function AdminPage({
                       <td className="px-4 py-2">{overdueDays > 0 ? overdueDays : "-"}</td>
                       <td className="px-4 py-2">{fmt(s.createdAt)}</td>
                       <td className="px-4 py-2">
-                        <div className="flex flex-wrap gap-1">
-                          <a
-                            href={payLink}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="rounded border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-xs text-sky-300"
-                          >
-                            Link pago
-                          </a>
-                          <form action="/api/admin/subscriptions/mark-contacted" method="post">
-                            <input type="hidden" name="subscriptionId" value={s.id} />
-                            <button className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-300" type="submit">
-                              {s.contactedAt ? "Contactado" : "Marcar contacto"}
-                            </button>
-                          </form>
-                          <form action="/api/admin/subscriptions/grant-trial" method="post">
-                            <input type="hidden" name="email" value={s.email} />
-                            <input type="hidden" name="plan" value={s.planId} />
-                            <input type="hidden" name="days" value="7" />
-                            <input type="hidden" name="reason" value="support_trial" />
-                            <button className="rounded border border-fuchsia-500/40 bg-fuchsia-500/10 px-2 py-1 text-xs text-fuchsia-300" type="submit">
-                              Trial 7d
-                            </button>
-                          </form>
-                          {(s.status === "past_due" || s.status === "canceled") && (
-                            <form action="/api/admin/subscriptions/reactivate" method="post">
-                              <input type="hidden" name="subscriptionId" value={s.id} />
-                              <button className="rounded border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300" type="submit">
-                                Reactivar
-                              </button>
-                            </form>
-                          )}
-                        </div>
+                        <SubscriptionActions
+                          subscriptionId={s.id}
+                          email={s.email}
+                          planId={s.planId}
+                          status={s.status}
+                          contactedAt={s.contactedAt}
+                          payLink={payLink}
+                        />
                       </td>
                     </tr>
                   );
