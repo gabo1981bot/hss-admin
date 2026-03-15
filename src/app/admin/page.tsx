@@ -2,6 +2,16 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { SubscriptionActions } from "./subscription-actions";
 
+type SecurityEvent = {
+  id: string;
+  eventType: string;
+  email: string | null;
+  ip: string | null;
+  path: string | null;
+  statusCode: number | null;
+  createdAt: string;
+};
+
 export const metadata = {
   robots: { index: false, follow: false },
 };
@@ -19,6 +29,27 @@ function statusBadge(status: string) {
   if (status === "past_due") return "bg-rose-500/20 text-rose-300 border-rose-500/30";
   if (status === "trial") return "bg-sky-500/20 text-sky-300 border-sky-500/30";
   return "bg-slate-500/20 text-slate-300 border-slate-500/30";
+}
+
+async function fetchSecurityEvents(): Promise<SecurityEvent[]> {
+  const appUrl = process.env.HSS_TALLER_APP_URL || "https://app.taller.hss.ar";
+  const secret = process.env.BILLING_OPS_SECRET || "";
+  if (!secret) return [];
+
+  try {
+    const response = await fetch(`${appUrl.replace(/\/$/, "")}/api/billing/ops/security-events`, {
+      headers: {
+        Authorization: `Bearer ${secret}`,
+      },
+      cache: "no-store",
+    });
+
+    if (!response.ok) return [];
+    const data = (await response.json()) as { events?: SecurityEvent[] };
+    return data.events ?? [];
+  } catch {
+    return [];
+  }
 }
 
 const validStatuses = ["all", "active", "pending_payment", "past_due", "trial", "canceled"] as const;
@@ -85,6 +116,7 @@ export default async function AdminPage({
     dueIn7Days,
     subscriptions,
     profiles,
+    securityEvents,
   ] = await Promise.all([
     prisma.profile.count(),
     prisma.subscription.count(),
@@ -118,6 +150,7 @@ export default async function AdminPage({
       take: 20,
       select: { id: true, fullName: true, email: true, role: true, createdAt: true },
     }),
+    fetchSecurityEvents(),
   ]);
 
   const exportUrl = `/api/admin/subscriptions/export?status=${encodeURIComponent(status)}&q=${encodeURIComponent(q)}&app=${encodeURIComponent(app)}&preset=${encodeURIComponent(preset)}`;
@@ -316,6 +349,41 @@ export default async function AdminPage({
                     </tr>
                   );
                 })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="border border-white/10 rounded-2xl overflow-hidden bg-[#232331]">
+          <h2 className="px-4 py-3 border-b border-white/10 font-semibold">Seguridad · eventos recientes</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] text-sm">
+              <thead className="bg-white/5 text-left text-slate-300">
+                <tr>
+                  <th className="px-4 py-2">Fecha</th>
+                  <th className="px-4 py-2">Evento</th>
+                  <th className="px-4 py-2">Email</th>
+                  <th className="px-4 py-2">IP</th>
+                  <th className="px-4 py-2">Path</th>
+                  <th className="px-4 py-2">HTTP</th>
+                </tr>
+              </thead>
+              <tbody>
+                {securityEvents.map((e) => (
+                  <tr key={e.id} className="border-t border-white/10">
+                    <td className="px-4 py-2">{fmt(new Date(e.createdAt))}</td>
+                    <td className="px-4 py-2">{e.eventType}</td>
+                    <td className="px-4 py-2">{e.email ?? "-"}</td>
+                    <td className="px-4 py-2">{e.ip ?? "-"}</td>
+                    <td className="px-4 py-2">{e.path ?? "-"}</td>
+                    <td className="px-4 py-2">{e.statusCode ?? "-"}</td>
+                  </tr>
+                ))}
+                {securityEvents.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-3 text-slate-400">No hay eventos de seguridad o falta BILLING_OPS_SECRET/HSS_TALLER_APP_URL.</td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
