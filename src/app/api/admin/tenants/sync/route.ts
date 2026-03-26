@@ -10,6 +10,7 @@ type SyncPayload = {
   ownerEmail?: string;
   planCode?: string;
   status?: string;
+  eventType?: string;
   syncedAt?: string;
 };
 
@@ -27,6 +28,17 @@ function mapStatus(status: string): SubscriptionStatus {
   if (s === "past_due") return "past_due";
   if (s === "canceled" || s === "cancelled") return "canceled";
   return "pending_payment";
+}
+
+function canonicalEventType(payload: SyncPayload): string {
+  if (payload.eventType && payload.eventType.includes(".")) return payload.eventType;
+
+  const s = (payload.status || "").toLowerCase();
+  if (s === "active" || s === "approved") return "subscription.activated";
+  if (s === "trial") return "subscription.trial.started";
+  if (s === "past_due") return "subscription.past_due";
+  if (s === "canceled" || s === "cancelled") return "subscription.canceled";
+  return "subscription.updated";
 }
 
 function unauthorized() {
@@ -62,6 +74,7 @@ export async function POST(request: Request) {
   });
 
   const startsAt = body.syncedAt ? new Date(body.syncedAt) : new Date();
+  const eventType = canonicalEventType(body);
 
   const subscription = existing
     ? await prisma.subscription.update({
@@ -89,7 +102,7 @@ export async function POST(request: Request) {
     data: {
       subscriptionId: subscription.id,
       source: "hss_market_sync",
-      eventType: "tenant_sync",
+      eventType,
       externalId: tenantId,
       payload: body,
     },
