@@ -30,6 +30,19 @@ function mapStatus(status: string): SubscriptionStatus {
   return "pending_payment";
 }
 
+const legacyMap: Record<string, string> = {
+  payment_approved: "payment.approved",
+  payment_pending: "payment.pending",
+  payment_in_process: "payment.pending",
+  payment_rejected: "payment.rejected",
+  payment_cancelled: "payment.rejected",
+  payment_canceled: "payment.rejected",
+  trial_started: "subscription.trial.started",
+  trial_expired_pending_deletion: "subscription.trial.expired",
+  status_past_due: "subscription.past_due",
+  status_canceled_after_grace: "subscription.canceled",
+};
+
 function canonicalEventType(payload: SyncPayload): string {
   const incoming = (payload.eventType || "").trim();
   if (!incoming) {
@@ -42,21 +55,21 @@ function canonicalEventType(payload: SyncPayload): string {
   }
 
   if (incoming.includes(".")) return incoming;
-
-  const legacyMap: Record<string, string> = {
-    payment_approved: "payment.approved",
-    payment_pending: "payment.pending",
-    payment_in_process: "payment.pending",
-    payment_rejected: "payment.rejected",
-    payment_cancelled: "payment.rejected",
-    payment_canceled: "payment.rejected",
-    trial_started: "subscription.trial.started",
-    trial_expired_pending_deletion: "subscription.trial.expired",
-    status_past_due: "subscription.past_due",
-    status_canceled_after_grace: "subscription.canceled",
-  };
-
   return legacyMap[incoming] || "subscription.updated";
+}
+
+function legacyCutoffDate() {
+  const raw = process.env.LEGACY_EVENT_CUTOFF_AT;
+  if (!raw) return null;
+  const dt = new Date(raw);
+  if (Number.isNaN(dt.getTime())) return null;
+  return dt;
+}
+
+function isLegacyAccepted() {
+  const cutoff = legacyCutoffDate();
+  if (!cutoff) return true;
+  return Date.now() <= cutoff.getTime();
 }
 
 function unauthorized() {
@@ -94,6 +107,18 @@ export async function POST(request: Request) {
   const startsAt = body.syncedAt ? new Date(body.syncedAt) : new Date();
   const incomingEventType = (body.eventType || "").trim();
   const isLegacyEventInput = !!incomingEventType && !incomingEventType.includes(".");
+  if (isLegacyEventInput && !isLegacyAccepted()) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "legacy_event_type_not_allowed",
+        incomingEventType,
+        cutoffAt: process.env.LEGACY_EVENT_CUTOFF_AT || null,
+      },
+      { status: 422 },
+    );
+  }
+
   const eventType = canonicalEventType(body);
   const syncSource = moduleName === "market" ? "hss_market_sync" : moduleName === "taller" ? "hss_taller_sync" : "hss_unknown_sync";
 

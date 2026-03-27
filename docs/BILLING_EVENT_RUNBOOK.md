@@ -34,6 +34,16 @@ Payload mínimo:
 ```
 
 ## Compatibilidad legacy (ventana temporal)
+Configurar fecha de corte en admin:
+
+```env
+LEGACY_EVENT_CUTOFF_AT=2026-04-10T00:00:00Z
+```
+
+Comportamiento:
+- Antes de la fecha: admin mapea legacy -> canónico.
+- Después de la fecha: admin rechaza legacy con `422 legacy_event_type_not_allowed`.
+
 Admin mapea automáticamente eventos legacy a canónicos:
 - `payment_approved` -> `payment.approved`
 - `payment_pending`/`payment_in_process` -> `payment.pending`
