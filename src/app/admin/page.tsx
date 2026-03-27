@@ -109,7 +109,7 @@ export default async function AdminPage({
     ? ((params.event || "all") as EventFilter)
     : "all";
   const q = (params.q || "").trim();
-  const app = (params.app || "hss_taller").trim();
+  const app = (params.app || "all").trim();
   const preset = (params.preset || "").trim();
 
   const where: {
@@ -118,7 +118,9 @@ export default async function AdminPage({
     email?: { contains: string; mode: "insensitive" };
     createdAt?: { lte?: Date };
     currentPeriodEnd?: { gte?: Date; lte?: Date };
-  } = { appId: app || "hss_taller" };
+  } = {};
+
+  if (app !== "all") where.appId = app;
 
   if (status !== "all") {
     where.status = status;
@@ -161,12 +163,13 @@ export default async function AdminPage({
     legacyEventsLast14d,
   ] = await Promise.all([
     prisma.profile.count(),
-    prisma.subscription.count(),
-    prisma.subscription.count({ where: { status: "active" } }),
-    prisma.subscription.count({ where: { status: "pending_payment" } }),
-    prisma.subscription.count({ where: { status: "past_due" } }),
+    prisma.subscription.count({ where: app !== "all" ? { appId: app } : undefined }),
+    prisma.subscription.count({ where: { ...(app !== "all" ? { appId: app } : {}), status: "active" } }),
+    prisma.subscription.count({ where: { ...(app !== "all" ? { appId: app } : {}), status: "pending_payment" } }),
+    prisma.subscription.count({ where: { ...(app !== "all" ? { appId: app } : {}), status: "past_due" } }),
     prisma.subscription.count({
       where: {
+        ...(app !== "all" ? { appId: app } : {}),
         status: "active",
         currentPeriodEnd: { gte: now, lte: in7Days },
       },
@@ -337,7 +340,9 @@ export default async function AdminPage({
               defaultValue={app}
               className="rounded-lg border border-white/20 bg-[#191923] px-3 py-2 text-sm outline-none"
             >
+              <option value="all">Todas las apps</option>
               <option value="hss_taller">HSS Taller</option>
+              <option value="hss_market">HSS Market</option>
             </select>
             <select
               name="status"
@@ -422,7 +427,8 @@ export default async function AdminPage({
                       ? Math.max(1, Math.floor((nowMs - s.currentPeriodEnd.getTime()) / (24 * 60 * 60 * 1000)))
                       : 0;
 
-                  const payLink = `https://app.taller.hss.ar/checkout?plan=${s.planId}&email=${encodeURIComponent(s.email)}`;
+                  const payBase = s.appId === "hss_market" ? "https://app.market.hss.ar" : "https://app.taller.hss.ar";
+                  const payLink = `${payBase}/checkout?plan=${s.planId}&email=${encodeURIComponent(s.email)}`;
 
                   return (
                     <tr key={s.id} className="border-t border-white/10">
