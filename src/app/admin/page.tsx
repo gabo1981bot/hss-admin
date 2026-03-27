@@ -12,6 +12,16 @@ type SecurityEvent = {
   createdAt: string;
 };
 
+type SubscriptionEventRow = {
+  id: string;
+  createdAt: Date;
+  source: string;
+  eventType: string;
+  externalId: string | null;
+  appId: string;
+  email: string;
+};
+
 export const metadata = {
   robots: { index: false, follow: false },
 };
@@ -53,8 +63,29 @@ async function fetchSecurityEvents(): Promise<SecurityEvent[]> {
 }
 
 const validStatuses = ["all", "active", "pending_payment", "past_due", "trial", "canceled"] as const;
+const validEventTypes = [
+  "all",
+  "subscription.activated",
+  "subscription.trial.started",
+  "subscription.past_due",
+  "subscription.canceled",
+  "payment.approved",
+  "payment.pending",
+  "payment.rejected",
+] as const;
+
+const legacyEventAliases: Record<string, string[]> = {
+  "subscription.trial.started": ["trial_started"],
+  "subscription.trial.expired": ["trial_expired_pending_deletion"],
+  "subscription.past_due": ["status_past_due"],
+  "subscription.canceled": ["status_canceled_after_grace"],
+  "payment.approved": ["payment_approved"],
+  "payment.pending": ["payment_pending", "payment_in_process"],
+  "payment.rejected": ["payment_rejected", "payment_cancelled", "payment_canceled"],
+};
 
 type StatusFilter = (typeof validStatuses)[number];
+type EventFilter = (typeof validEventTypes)[number];
 
 export default async function AdminPage({
   searchParams,
@@ -65,6 +96,7 @@ export default async function AdminPage({
     q?: string;
     app?: string;
     preset?: string;
+    event?: string;
     ok?: string;
     err?: string;
   }>;
@@ -72,6 +104,9 @@ export default async function AdminPage({
   const params = (await searchParams) || {};
   const status = validStatuses.includes((params.status || "all") as StatusFilter)
     ? ((params.status || "all") as StatusFilter)
+    : "all";
+  const eventFilter = validEventTypes.includes((params.event || "all") as EventFilter)
+    ? ((params.event || "all") as EventFilter)
     : "all";
   const q = (params.q || "").trim();
   const app = (params.app || "hss_taller").trim();
@@ -107,6 +142,11 @@ export default async function AdminPage({
     where.currentPeriodEnd = { gte: now, lte: in7Days };
   }
 
+  const eventTypesForFilter =
+    eventFilter === "all"
+      ? undefined
+      : [eventFilter, ...(legacyEventAliases[eventFilter] || [])];
+
   const [
     totalProfiles,
     totalSubs,
@@ -117,6 +157,8 @@ export default async function AdminPage({
     subscriptions,
     profiles,
     securityEvents,
+    rawSubscriptionEvents,
+    legacyEventsLast14d,
   ] = await Promise.all([
     prisma.profile.count(),
     prisma.subscription.count(),
@@ -151,7 +193,53 @@ export default async function AdminPage({
       select: { id: true, fullName: true, email: true, role: true, createdAt: true },
     }),
     fetchSecurityEvents(),
+    prisma.subscriptionEvent.findMany({
+      where: eventTypesForFilter ? { eventType: { in: eventTypesForFilter } } : undefined,
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      select: {
+        id: true,
+        subscriptionId: true,
+        source: true,
+        eventType: true,
+        externalId: true,
+        createdAt: true,
+      },
+    }),
+    prisma.subscriptionEvent.count({
+      where: {
+        createdAt: { gte: new Date(nowMs - 14 * 24 * 60 * 60 * 1000) },
+        eventType: { not: { contains: "." } },
+      },
+    }),
   ]);
+
+  const eventSubscriptionIds = Array.from(new Set(rawSubscriptionEvents.map((e) => e.subscriptionId)));
+  const eventSubscriptions = eventSubscriptionIds.length
+    ? await prisma.subscription.findMany({
+        where: { id: { in: eventSubscriptionIds } },
+        select: { id: true, appId: true, email: true },
+      })
+    : [];
+  const eventSubById = new Map(eventSubscriptions.map((s) => [s.id, s]));
+
+  const subscriptionEvents: SubscriptionEventRow[] = rawSubscriptionEvents
+    .map((e) => {
+      const sub = eventSubById.get(e.subscriptionId);
+      if (!sub) return null;
+      return {
+        id: e.id,
+        createdAt: e.createdAt,
+        source: e.source,
+        eventType: e.eventType,
+        externalId: e.externalId ?? null,
+        appId: sub.appId,
+        email: sub.email,
+      } satisfies SubscriptionEventRow;
+    })
+    .filter((e): e is SubscriptionEventRow => !!e)
+    .filter((e) => (app ? e.appId === app : true))
+    .slice(0, 80);
 
   const exportUrl = `/api/admin/subscriptions/export?status=${encodeURIComponent(status)}&q=${encodeURIComponent(q)}&app=${encodeURIComponent(app)}&preset=${encodeURIComponent(preset)}`;
 
@@ -243,7 +331,7 @@ export default async function AdminPage({
             </form>
           </div>
 
-          <form className="grid gap-3 md:grid-cols-[180px_220px_1fr_auto_auto]" method="get" action="/admin">
+          <form className="grid gap-3 md:grid-cols-[180px_220px_260px_1fr_auto_auto]" method="get" action="/admin">
             <select
               name="app"
               defaultValue={app}
@@ -263,6 +351,20 @@ export default async function AdminPage({
               <option value="trial">Trial</option>
               <option value="canceled">Canceladas</option>
             </select>
+            <select
+              name="event"
+              defaultValue={eventFilter}
+              className="rounded-lg border border-white/20 bg-[#191923] px-3 py-2 text-sm outline-none"
+            >
+              <option value="all">Todos los eventos</option>
+              <option value="subscription.activated">subscription.activated</option>
+              <option value="subscription.trial.started">subscription.trial.started</option>
+              <option value="subscription.past_due">subscription.past_due</option>
+              <option value="subscription.canceled">subscription.canceled</option>
+              <option value="payment.approved">payment.approved</option>
+              <option value="payment.pending">payment.pending</option>
+              <option value="payment.rejected">payment.rejected</option>
+            </select>
             <input
               name="q"
               defaultValue={q}
@@ -281,13 +383,13 @@ export default async function AdminPage({
           </form>
 
           <div className="flex flex-wrap gap-2 text-xs">
-            <Link className="rounded-full border border-white/20 px-3 py-1 hover:bg-white/5" href={`/admin?app=${encodeURIComponent(app)}&preset=pending_48h`}>
+            <Link className="rounded-full border border-white/20 px-3 py-1 hover:bg-white/5" href={`/admin?app=${encodeURIComponent(app)}&event=${encodeURIComponent(eventFilter)}&preset=pending_48h`}>
               Pendientes &gt; 48h
             </Link>
-            <Link className="rounded-full border border-white/20 px-3 py-1 hover:bg-white/5" href={`/admin?app=${encodeURIComponent(app)}&preset=due_7d`}>
+            <Link className="rounded-full border border-white/20 px-3 py-1 hover:bg-white/5" href={`/admin?app=${encodeURIComponent(app)}&event=${encodeURIComponent(eventFilter)}&preset=due_7d`}>
               Vencen en 7 días
             </Link>
-            <Link className="rounded-full border border-white/20 px-3 py-1 hover:bg-white/5" href={`/admin?app=${encodeURIComponent(app)}&status=past_due`}>
+            <Link className="rounded-full border border-white/20 px-3 py-1 hover:bg-white/5" href={`/admin?app=${encodeURIComponent(app)}&event=${encodeURIComponent(eventFilter)}&status=past_due`}>
               Solo deudores
             </Link>
             <Link className="rounded-full border border-white/20 px-3 py-1 hover:bg-white/5" href={`/admin?app=${encodeURIComponent(app)}`}>
@@ -349,6 +451,47 @@ export default async function AdminPage({
                     </tr>
                   );
                 })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {legacyEventsLast14d > 0 ? (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+            legacy_event_detected: se encontraron <strong>{legacyEventsLast14d}</strong> eventos legacy (sin formato canónico) en los últimos 14 días.
+          </div>
+        ) : null}
+
+        <section className="border border-white/10 rounded-2xl overflow-hidden bg-[#232331]">
+          <h2 className="px-4 py-3 border-b border-white/10 font-semibold">Suscripción · eventos recientes</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1100px] text-sm">
+              <thead className="bg-white/5 text-left text-slate-300">
+                <tr>
+                  <th className="px-4 py-2">Fecha</th>
+                  <th className="px-4 py-2">Evento</th>
+                  <th className="px-4 py-2">App</th>
+                  <th className="px-4 py-2">Email</th>
+                  <th className="px-4 py-2">Source</th>
+                  <th className="px-4 py-2">External ID</th>
+                </tr>
+              </thead>
+              <tbody>
+                {subscriptionEvents.map((e) => (
+                  <tr key={e.id} className="border-t border-white/10">
+                    <td className="px-4 py-2">{fmt(e.createdAt)}</td>
+                    <td className="px-4 py-2">{e.eventType}</td>
+                    <td className="px-4 py-2">{e.appId}</td>
+                    <td className="px-4 py-2">{e.email}</td>
+                    <td className="px-4 py-2">{e.source}</td>
+                    <td className="px-4 py-2">{e.externalId ?? "-"}</td>
+                  </tr>
+                ))}
+                {subscriptionEvents.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-3 text-slate-400">No hay eventos para los filtros seleccionados.</td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>

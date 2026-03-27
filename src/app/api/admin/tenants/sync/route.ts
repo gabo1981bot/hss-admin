@@ -31,14 +31,32 @@ function mapStatus(status: string): SubscriptionStatus {
 }
 
 function canonicalEventType(payload: SyncPayload): string {
-  if (payload.eventType && payload.eventType.includes(".")) return payload.eventType;
+  const incoming = (payload.eventType || "").trim();
+  if (!incoming) {
+    const s = (payload.status || "").toLowerCase();
+    if (s === "active" || s === "approved") return "subscription.activated";
+    if (s === "trial") return "subscription.trial.started";
+    if (s === "past_due") return "subscription.past_due";
+    if (s === "canceled" || s === "cancelled") return "subscription.canceled";
+    return "subscription.updated";
+  }
 
-  const s = (payload.status || "").toLowerCase();
-  if (s === "active" || s === "approved") return "subscription.activated";
-  if (s === "trial") return "subscription.trial.started";
-  if (s === "past_due") return "subscription.past_due";
-  if (s === "canceled" || s === "cancelled") return "subscription.canceled";
-  return "subscription.updated";
+  if (incoming.includes(".")) return incoming;
+
+  const legacyMap: Record<string, string> = {
+    payment_approved: "payment.approved",
+    payment_pending: "payment.pending",
+    payment_in_process: "payment.pending",
+    payment_rejected: "payment.rejected",
+    payment_cancelled: "payment.rejected",
+    payment_canceled: "payment.rejected",
+    trial_started: "subscription.trial.started",
+    trial_expired_pending_deletion: "subscription.trial.expired",
+    status_past_due: "subscription.past_due",
+    status_canceled_after_grace: "subscription.canceled",
+  };
+
+  return legacyMap[incoming] || "subscription.updated";
 }
 
 function unauthorized() {
@@ -74,7 +92,10 @@ export async function POST(request: Request) {
   });
 
   const startsAt = body.syncedAt ? new Date(body.syncedAt) : new Date();
+  const incomingEventType = (body.eventType || "").trim();
+  const isLegacyEventInput = !!incomingEventType && !incomingEventType.includes(".");
   const eventType = canonicalEventType(body);
+  const syncSource = moduleName === "market" ? "hss_market_sync" : moduleName === "taller" ? "hss_taller_sync" : "hss_unknown_sync";
 
   const subscription = existing
     ? await prisma.subscription.update({
@@ -101,12 +122,29 @@ export async function POST(request: Request) {
   await prisma.subscriptionEvent.create({
     data: {
       subscriptionId: subscription.id,
-      source: "hss_market_sync",
+      source: syncSource,
       eventType,
       externalId: tenantId,
       payload: body,
     },
   });
+
+  if (isLegacyEventInput) {
+    console.warn("legacy_event_detected", { moduleName, tenantId, incomingEventType, mappedTo: eventType });
+    await prisma.subscriptionEvent.create({
+      data: {
+        subscriptionId: subscription.id,
+        source: syncSource,
+        eventType: "legacy_event_detected",
+        externalId: tenantId,
+        payload: {
+          incomingEventType,
+          mappedTo: eventType,
+          moduleName,
+        },
+      },
+    });
+  }
 
   return NextResponse.json({
     ok: true,
